@@ -13,7 +13,6 @@ The Auto-Loading feature automatically detects and loads the most recent data fi
 
 ## Supported File Formats
 
-- **JSON** (`.json`)
 - **CSV** (`.csv`)
 - **TSV** (`.tsv`)
 - **Excel** (`.xlsx`, `.xls`)
@@ -25,7 +24,7 @@ The Auto-Loading feature automatically detects and loads the most recent data fi
 aisheets/
 ├── public/
 │   └── data/           # Place your data files here
-│       ├── candidates.json
+│       ├── candidates.csv
 │       ├── users.csv
 │       └── sales.xlsx
 ```
@@ -44,7 +43,7 @@ aisheets/
 curl -X POST http://localhost:5173/api/load-public-file \
   -H "Content-Type: application/json" \
   -d '{
-    "publicFileName": "data/candidates.json",
+    "publicFileName": "data/candidates.csv",
     "datasetName": "Candidates Dataset"
   }'
 ```
@@ -57,7 +56,7 @@ import { importDatasetFromPublicFile } from '~/services/repository/datasets';
 const dataset = await importDatasetFromPublicFile({
   name: "My Dataset",
   createdBy: "username",
-  publicFileName: "data/myfile.json"
+  publicFileName: "data/myfile.csv"
 });
 ```
 
@@ -102,19 +101,18 @@ Enable debug logging by setting `DEBUG=true` in your environment variables.
 
 ## Examples
 
-### JSON Data
-```json
-[
-  {"name": "John", "age": 30},
-  {"name": "Jane", "age": 25}
-]
-```
-
 ### CSV Data
 ```csv
 name,age,city
 John,30,New York
 Jane,25,San Francisco
+```
+
+### TSV Data
+```tsv
+name	age	city
+John	30	New York
+Jane	25	San Francisco
 ```
 
 ## Benefits
