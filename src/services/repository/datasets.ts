@@ -7,6 +7,7 @@ import {
   countDatasetTableRows,
   createDatasetTable,
   createDatasetTableFromFile,
+  createDatasetTableFromPublicFile,
 } from './tables';
 
 interface CreateDatasetParams {
@@ -198,4 +199,59 @@ export const updateDataset = async ({
     columns: [],
     size: datasetSize,
   };
+};
+
+export const importDatasetFromPublicFile = async (
+  {
+    name,
+    createdBy,
+    publicFileName,
+  }: {
+    name: string;
+    createdBy: string;
+    publicFileName: string;
+  },
+  options?: {
+    limit?: number;
+  },
+): Promise<Dataset> => {
+  const model = await DatasetModel.create({
+    name,
+    createdBy,
+  });
+
+  try {
+    const columns = await createDatasetTableFromPublicFile(
+      {
+        dataset: {
+          id: model.id,
+          name: model.name,
+          createdBy: model.createdBy,
+        },
+        publicFileName,
+      },
+      options,
+    );
+
+    const datasetSize = await countDatasetTableRows({ dataset: model });
+
+    sendTelemetry('dataset.import.public', createdBy, {
+      datasetId: model.id,
+      publicFileName,
+    });
+
+    return {
+      id: model.id,
+      name: model.name,
+      createdBy: model.createdBy,
+      columns,
+      createdAt: model.createdAt,
+      updatedAt: model.updatedAt,
+      size: datasetSize,
+    };
+  } catch (error) {
+    // Clean up the dataset if creation fails
+    await model.destroy();
+    throw error;
+  }
 };

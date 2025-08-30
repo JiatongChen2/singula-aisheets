@@ -10,3 +10,4 @@ export * from './textarea/textarea';
 export * from './checkbox/checkbox';
 export * from './toggle-group/toggle-group';
 export * from './accordion/accordion';
+export * from './data-viewer/data-viewer';

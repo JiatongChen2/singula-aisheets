@@ -38,3 +38,7 @@ await connectAndClose(async (db) => {
     LOAD gsheets;
   `);
 });
+
+// Initialize auto-loader after database is ready
+import { initializeAutoLoader } from '../startup/auto-loader';
+await initializeAutoLoader();
