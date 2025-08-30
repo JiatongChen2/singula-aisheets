@@ -37,6 +37,147 @@ const runAutoDatasetAction = server$(async function* (
   });
 });
 
+const loadDataFileAction = server$(async () => {
+  try {
+    const { readFile, readdir, stat } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+
+    const dataDir = join(process.cwd(), 'public', 'data');
+
+    // Check if directory exists
+    try {
+      await stat(dataDir);
+    } catch {
+      return { success: false, error: 'No public/data directory found' };
+    }
+
+    const files = await readdir(dataDir);
+
+    // Filter for supported file types
+    const supportedExtensions = [
+      '.json',
+      '.csv',
+      '.tsv',
+      '.xlsx',
+      '.xls',
+      '.parquet',
+    ];
+    const supportedFiles = files.filter((file) => {
+      const ext = file.toLowerCase();
+      return supportedExtensions.some((supportedExt) =>
+        ext.endsWith(supportedExt),
+      );
+    });
+
+    if (supportedFiles.length === 0) {
+      return {
+        success: false,
+        error: 'No supported data files found in public/data/',
+      };
+    }
+
+    // Get file stats and find the most recent
+    let mostRecentFile: string | null = null;
+    let mostRecentTime = new Date(0);
+
+    for (const file of supportedFiles) {
+      const fullPath = join(dataDir, file);
+      const stats = await stat(fullPath);
+
+      if (stats.mtime > mostRecentTime) {
+        mostRecentTime = stats.mtime;
+        mostRecentFile = file;
+      }
+    }
+
+    if (!mostRecentFile) {
+      return { success: false, error: 'Could not determine most recent file' };
+    }
+
+    // Read the file content
+    const filePath = join(dataDir, mostRecentFile);
+    const fileContent = await readFile(filePath, 'utf-8');
+
+    // Parse CSV content
+    const lines = fileContent.trim().split('\n');
+    const headers = lines[0].split(',').map((h) => h.trim().replace(/"/g, ''));
+
+    const data = lines.slice(1).map((line) => {
+      const values = line.split(',').map((v) => v.trim().replace(/"/g, ''));
+      return values;
+    });
+
+    return {
+      success: true,
+      data: {
+        headers,
+        data,
+        fileName: mostRecentFile,
+      },
+    };
+  } catch (error) {
+    console.error('Error loading data file:', error);
+    return { success: false, error: 'Failed to load data file' };
+  }
+});
+
+const createDatasetFromDataAction = server$(
+  async (dataInfo: {
+    headers: string[];
+    data: string[][];
+    fileName: string;
+  }) => {
+    try {
+      // Import the necessary modules
+      const { DatasetModel } = await import('~/services/db/models');
+      const { createDatasetTableFromFile } = await import(
+        '~/services/repository/tables'
+      );
+      const { sendTelemetry } = await import(
+        '~/services/repository/hub/telemetry'
+      );
+      const { join } = await import('node:path');
+
+      // Create a new dataset
+      const model = await DatasetModel.create({
+        name: `Singula Hiring Search Results - ${dataInfo.fileName}`,
+        createdBy: 'system', // You can change this to use actual user session
+      });
+
+      // Create a temporary file path that points to our data
+      const tempFilePath = join(
+        process.cwd(),
+        'public',
+        'data',
+        dataInfo.fileName,
+      );
+
+      // Use the existing proven file import logic
+      await createDatasetTableFromFile({
+        dataset: {
+          id: model.id,
+          name: model.name,
+          createdBy: model.createdBy,
+        },
+        file: tempFilePath,
+      });
+
+      // Send telemetry
+      sendTelemetry('dataset.import.auto', 'system', {
+        datasetId: model.id,
+        fileName: dataInfo.fileName,
+        rowCount: dataInfo.data.length,
+        columnCount: dataInfo.headers.length,
+      });
+
+      return model.id;
+    } catch (error) {
+      console.error('Error creating dataset from data:', error);
+      return null;
+    }
+  },
+);
+
 export default component$(() => {
   const session = useSession();
   const nav = useNavigate();
@@ -91,6 +232,8 @@ export default component$(() => {
   ];
 
   const isLoading = useSignal(false);
+  const isLoadingData = useSignal(false);
+  const dataError = useSignal<string | null>(null);
   const response = useStore<{
     text?: string;
     error?: string;
@@ -341,7 +484,7 @@ export default component$(() => {
               <div class="flex flex-col items-center justify-center mb-4">
                 <MainLogo class="mt-6 md:mt-0 w-[70px] h-[70px]" />
                 <h1 class="text-neutral-600 text-2xl font-semibold">
-                  AI Sheets
+                  Singula AI Sheets for Hiring and Sales
                 </h1>
               </div>
               <div class="bg-neutral-100 rounded-md flex justify-center items-center flex-wrap p-2 gap-2">
@@ -357,6 +500,138 @@ export default component$(() => {
                     <span class="text-sm text-neutral-700">{model.id}</span>
                   </div>
                 ))}
+              </div>
+
+              {/* Create Dataset Button */}
+              <div class="w-full md:w-[697px] flex justify-center items-center mb-6">
+                <button
+                  type="button"
+                  class="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-2"
+                  onClick$={async () => {
+                    try {
+                      isLoadingData.value = true;
+                      dataError.value = null;
+
+                      // Load the data file
+                      const result = await loadDataFileAction();
+                      if (!result.success || !result.data) {
+                        throw new Error(
+                          result.error || 'Failed to load data file',
+                        );
+                      }
+
+                      // Create dataset from the loaded data
+                      const datasetId = await createDatasetFromDataAction(
+                        result.data,
+                      );
+                      if (!datasetId) {
+                        throw new Error('Failed to create dataset from data');
+                      }
+
+                      // Navigate to the dataset page
+                      window.location.href = `/home/dataset/${datasetId}`;
+                    } catch (error) {
+                      console.error('Error loading data:', error);
+                      dataError.value =
+                        error instanceof Error
+                          ? error.message
+                          : 'Failed to create dataset';
+                    } finally {
+                      isLoadingData.value = false;
+                    }
+                  }}
+                >
+                  <svg
+                    class="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    role="img"
+                    aria-label="Create dataset icon"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M12 6v6m0 0v6m0-6h6m-6 0H6"
+                    />
+                  </svg>
+                  Show Singula Hiring Search Results
+                </button>
+              </div>
+
+              {/* Show Loading State */}
+              {isLoadingData.value && (
+                <div class="w-full md:w-[697px] mb-6">
+                  <div class="w-full bg-white border border-neutral-200 rounded-lg shadow-sm p-8 text-center">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4" />
+                    <p class="text-neutral-600">
+                      Loading Singula Hiring Search Results...
+                    </p>
+                    <p class="text-sm text-neutral-500 mt-2">
+                      Preparing dataset for LLM enrichment
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Show Error State */}
+              {dataError.value && (
+                <div class="w-full md:w-[697px] mb-6">
+                  <div class="w-full bg-red-50 border border-red-200 rounded-lg shadow-sm p-6 text-center">
+                    <div class="text-red-600 mb-2">
+                      <svg
+                        class="w-6 h-6 mx-auto"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        role="img"
+                        aria-label="Error icon"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                        />
+                      </svg>
+                    </div>
+                    <p class="text-red-800 font-medium">Error Loading Data</p>
+                    <p class="text-sm text-red-600 mt-1">{dataError.value}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Upload File Section */}
+              <div class="w-full md:w-[697px] flex justify-center items-center mb-4">
+                <button
+                  type="button"
+                  class="px-6 py-3 bg-neutral-100 text-neutral-700 rounded-lg font-medium hover:bg-neutral-200 transition-colors shadow-sm flex items-center gap-2"
+                  onClick$={() => {
+                    // Trigger the file input click
+                    const fileInput = document.getElementById('file-select');
+                    if (fileInput) {
+                      fileInput.click();
+                    }
+                  }}
+                >
+                  <svg
+                    class="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    role="img"
+                    aria-label="Upload icon"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                    />
+                  </svg>
+                  Upload File
+                </button>
               </div>
 
               <DragAndDrop />
