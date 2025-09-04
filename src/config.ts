@@ -242,6 +242,14 @@ export const GOOGLE_OAUTH_CLIENT_ID: string | undefined =
 export const GOOGLE_OAUTH_REDIRECT_URI: string | undefined =
   process.env.GOOGLE_OAUTH_REDIRECT_URI;
 
+/**
+ * The base URL for the Singula AI API.
+ * This value is retrieved from the environment variable `SINGULA_API_BASE_URL`.
+ * Default value: 'http://localhost:8000/api'
+ */
+const SINGULA_API_BASE_URL: string =
+  process.env.SINGULA_API_BASE_URL ?? 'http://localhost:8000/api';
+
 const RUNTIME_ENV = join(DATA_DIR, process.env.NODE_ENV ?? 'development');
 
 export const appConfig = {
@@ -292,4 +300,8 @@ export const appConfig = {
   },
 
   enableTelemetry: TELEMETRY_ENABLED,
+
+  singula: {
+    apiBaseUrl: SINGULA_API_BASE_URL,
+  },
 };
